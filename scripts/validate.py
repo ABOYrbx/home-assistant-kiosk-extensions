@@ -34,6 +34,7 @@ MATCHED_MANIFEST_FIELDS = (
     "permissions",
     "config_schema",
 )
+FORBIDDEN_SUFFIXES = {".so", ".dylib", ".dll", ".exe", ".wasm", ".slint", ".html", ".htm"}
 SECRET_PATTERNS = (
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),
@@ -223,6 +224,8 @@ def scan_source(source: Path, errors: list[str]) -> None:
             continue
         if path.suffix.lower() in {".key", ".pem", ".env"} or path.name == ".env":
             errors.append(f"{relative}: secret-key files are not allowed")
+        if path.suffix.lower() in FORBIDDEN_SUFFIXES:
+            errors.append(f"{relative}: forbidden native or arbitrary UI file")
         if path.stat().st_size > MAX_DECOMPRESSED_BYTES:
             errors.append(f"{relative}: source file exceeds 20 MiB")
         if path.suffix.lower() in {".toml", ".rhai", ".md", ".txt"} or path.name == "LICENSE":

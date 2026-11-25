@@ -207,6 +207,17 @@ class ValidatorTest(unittest.TestCase):
         self.assertNotIn("Traceback", result.stdout + result.stderr)
         self.assertIn("permissions", result.stdout + result.stderr)
 
+    def test_native_and_arbitrary_ui_files_are_rejected(self) -> None:
+        value = entry()
+        self.write_index({"schema_version": 1, "generated_at": GENERATED_AT, "extensions": [value]})
+        self.write_source()
+        source = self.root / "extensions" / ID
+        for name in ("plugin.so", "plugin.wasm", "widget.slint", "widget.html"):
+            with self.subTest(name=name):
+                (source / name).write_bytes(b"forbidden")
+                self.assert_invalid("forbidden")
+                (source / name).unlink()
+
 
 if __name__ == "__main__":
     unittest.main()
