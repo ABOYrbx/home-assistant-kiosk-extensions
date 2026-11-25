@@ -25,6 +25,10 @@ from validate import (  # type: ignore[import-not-found]
     ValidationError,
     is_safe_relative_path,
     load_toml,
+    scan_source,
+    schema_errors,
+    schema_validators,
+    semantic_errors,
     valid_semver,
 )
 
@@ -56,6 +60,15 @@ def build(root: Path, dist: Path, extension_id: str, version: str) -> dict[str, 
         raise ValidationError(f"missing extension source directory: {source}")
     manifest_path = source / "manifest.toml"
     manifest = load_toml(manifest_path)
+    _, manifest_validator, _ = schema_validators(root)
+    errors = schema_errors(manifest_validator, manifest, "manifest.toml")
+    if not errors:
+        errors = semantic_errors(manifest, "manifest.toml", manifest=True)
+    source_errors: list[str] = []
+    scan_source(source, source_errors)
+    errors.extend(source_errors)
+    if errors:
+        raise ValidationError("manifest validation failed: " + "; ".join(errors))
     if manifest.get("id") != extension_id:
         raise ValidationError("manifest id does not match the requested id")
     if manifest.get("version") != version:

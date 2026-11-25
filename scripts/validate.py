@@ -9,7 +9,7 @@ import re
 import sys
 import tomllib
 from datetime import datetime, timedelta
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -17,7 +17,6 @@ from jsonschema import Draft202012Validator, FormatChecker
 from referencing import Registry, Resource
 
 ROOT = Path(__file__).resolve().parent.parent
-SCHEMA_DIR = ROOT / "schema"
 MAX_PACKAGE_BYTES = 5 * 1024 * 1024
 MAX_DECOMPRESSED_BYTES = 20 * 1024 * 1024
 MATCHED_MANIFEST_FIELDS = (
@@ -77,12 +76,12 @@ def load_toml(path: Path) -> dict[str, Any]:
     return value
 
 
-def schema_validators() -> tuple[Draft202012Validator, Draft202012Validator, Registry]:
-    index_schema = load_json(SCHEMA_DIR / "index.schema.json")
-    manifest_schema = load_json(SCHEMA_DIR / "manifest.schema.json")
-    registry = Registry().with_resource(
-        index_schema["$id"], Resource.from_contents(index_schema)
-    )
+def schema_validators(root: Path) -> tuple[Draft202012Validator, Draft202012Validator, Registry]:
+    schema_dir = root / "schema"
+    index_schema = load_json(schema_dir / "index.schema.json")
+    manifest_schema = load_json(schema_dir / "manifest.schema.json")
+    index_uri = index_schema.get("$id", (schema_dir / "index.schema.json").resolve().as_uri())
+    registry = Registry().with_resource(index_uri, Resource.from_contents(index_schema))
     checker = FormatChecker()
     return (
         Draft202012Validator(index_schema, registry=registry, format_checker=checker),
@@ -103,8 +102,7 @@ def schema_errors(validator: Draft202012Validator, value: Any, label: str) -> li
 def is_safe_relative_path(value: str) -> bool:
     if not value or value.startswith("/") or "\\" in value:
         return False
-    path = PurePosixPath(value)
-    return bool(path.parts) and all(part not in {"", ".", ".."} for part in path.parts)
+    return all(part not in {"", ".", ".."} for part in value.split("/"))
 
 
 def valid_semver(value: str) -> bool:
@@ -129,9 +127,9 @@ def config_default_error(field: dict[str, Any], value: Any) -> str | None:
     if kind == "integer":
         if not isinstance(value, int) or isinstance(value, bool):
             return "default must be an integer"
-        if "min" in field and value < field["min"]:
+        if field.get("min") is not None and value < field["min"]:
             return "default is below min"
-        if "max" in field and value > field["max"]:
+        if field.get("max") is not None and value > field["max"]:
             return "default is above max"
         return None
     if kind == "boolean":
@@ -161,11 +159,15 @@ def semantic_errors(value: dict[str, Any], label: str, *, manifest: bool) -> lis
     for key in ("version", "min_app_version"):
         if not valid_semver(value.get(key, "")):
             errors.append(f"{label}.{key}: must be valid semver")
+    if not isinstance(value.get("api_version"), int) or isinstance(value.get("api_version"), bool):
+        errors.append(f"{label}.api_version: must be an integer")
     if manifest:
         entry = value.get("entry", "")
         if not is_safe_relative_path(entry) or not entry.endswith(".rhai"):
             errors.append(f"{label}.entry: must be a safe relative path ending in .rhai")
     else:
+        if not isinstance(value.get("size_bytes"), int) or isinstance(value.get("size_bytes"), bool):
+            errors.append(f"{label}.size_bytes: must be an integer")
         parsed = urlsplit(value.get("package_url", ""))
         if parsed.scheme != "https" or not parsed.hostname:
             errors.append(f"{label}.package_url: must use HTTPS and include a host")
@@ -192,11 +194,16 @@ def semantic_errors(value: dict[str, Any], label: str, *, manifest: bool) -> lis
             errors.append(f"{label}.config_schema.{key}: label must not be empty")
         if field.get("type") == "select" and not field.get("options"):
             errors.append(f"{label}.config_schema.{key}: select needs options")
-        if "min" in field and "max" in field and field["min"] > field["max"]:
+        for bound in ("min", "max"):
+            if field.get(bound) is not None and (
+                not isinstance(field[bound], int) or isinstance(field[bound], bool)
+            ):
+                errors.append(f"{label}.config_schema.{key}.{bound}: must be an integer")
+        if field.get("min") is not None and field.get("max") is not None and field["min"] > field["max"]:
             errors.append(f"{label}.config_schema.{key}: min is greater than max")
-        if field.get("type") == "secret" and "default" in field:
+        if field.get("type") == "secret" and field.get("default") is not None:
             errors.append(f"{label}.config_schema.{key}: secret fields must not have defaults")
-        if "default" in field:
+        if field.get("default") is not None:
             default_error = config_default_error(field, field["default"])
             if default_error:
                 errors.append(f"{label}.config_schema.{key}: {default_error}")
@@ -206,8 +213,21 @@ def semantic_errors(value: dict[str, Any], label: str, *, manifest: bool) -> lis
 def normalized_manifest(value: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(value)
     normalized.setdefault("homepage", None)
-    normalized.setdefault("permissions", {"http_hosts": [], "ha_entities": []})
-    normalized.setdefault("config_schema", [])
+    permissions = dict(value.get("permissions", {}))
+    permissions.setdefault("http_hosts", [])
+    permissions.setdefault("ha_entities", [])
+    normalized["permissions"] = permissions
+    fields: list[dict[str, Any]] = []
+    for raw_field in value.get("config_schema", []):
+        field = dict(raw_field)
+        field.setdefault("required", False)
+        field["help"] = field.get("help")
+        field["default"] = field.get("default")
+        field["min"] = field.get("min")
+        field["max"] = field.get("max")
+        field.setdefault("options", [])
+        fields.append(field)
+    normalized["config_schema"] = fields
     return normalized
 
 
@@ -243,11 +263,13 @@ def validate(root: Path) -> list[str]:
     if not index_path.is_file():
         return [f"missing {index_path}"]
     index = load_json(index_path)
-    index_validator, manifest_validator, _ = schema_validators()
+    index_validator, manifest_validator, _ = schema_validators(root)
     errors = schema_errors(index_validator, index, "index.json")
     if errors:
         return errors
 
+    if not isinstance(index.get("schema_version"), int) or isinstance(index.get("schema_version"), bool):
+        errors.append("index.json.schema_version: must be an integer")
     generated = datetime.fromisoformat(index["generated_at"].replace("Z", "+00:00"))
     if generated.tzinfo is None or generated.utcoffset() != timedelta(0):
         errors.append("index.json.generated_at: must be UTC")

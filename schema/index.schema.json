@@ -41,7 +41,7 @@
         "description": {"type": "string", "minLength": 1, "maxLength": 2000},
         "author": {"type": "string", "minLength": 1},
         "license": {"type": "string", "minLength": 1},
-        "homepage": {"type": "string", "format": "uri", "pattern": "^https?://"},
+        "homepage": {"type": ["string", "null"], "format": "uri", "pattern": "^https?://"},
         "provides": {"enum": ["departures", "list", "key_value"]},
         "permissions": {"$ref": "#/$defs/Permissions"},
         "config_schema": {
@@ -97,10 +97,10 @@
         "label": {"type": "string", "minLength": 1},
         "type": {"enum": ["string", "integer", "boolean", "url", "secret", "entity_id", "select"]},
         "required": {"type": "boolean", "default": false},
-        "help": {"type": "string"},
+        "help": {"type": ["string", "null"]},
         "default": {},
-        "min": {"type": "integer"},
-        "max": {"type": "integer"},
+        "min": {"type": ["integer", "null"]},
+        "max": {"type": ["integer", "null"]},
         "options": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
       },
       "allOf": [
@@ -110,7 +110,7 @@
         },
         {
           "if": {"properties": {"type": {"const": "secret"}}, "required": ["type"]},
-          "then": {"not": {"required": ["default"]}}
+          "then": {"properties": {"default": {"type": "null"}}}
         }
       ]
     }

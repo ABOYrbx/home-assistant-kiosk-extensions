@@ -32,10 +32,10 @@ class RepositoryTest(unittest.TestCase):
         missing = [path for path in required if not (ROOT / path).is_file()]
         self.assertEqual(missing, [])
 
-    def test_initial_index_is_empty_and_schema_version_one(self) -> None:
+    def test_index_has_schema_version_one_and_an_extension_list(self) -> None:
         value = json.loads((ROOT / "index.json").read_text(encoding="utf-8"))
         self.assertEqual(value["schema_version"], 1)
-        self.assertEqual(value["extensions"], [])
+        self.assertIsInstance(value["extensions"], list)
 
     def test_signature_verifies_and_rejects_tampering(self) -> None:
         minisign = shutil.which("minisign")

@@ -31,7 +31,7 @@
     "provides": {"enum": ["departures", "list", "key_value"]},
     "author": {"type": "string", "minLength": 1},
     "license": {"type": "string", "minLength": 1},
-    "homepage": {"type": "string", "format": "uri", "pattern": "^https?://"},
+    "homepage": {"type": ["string", "null"], "format": "uri", "pattern": "^https?://"},
     "description": {"type": "string", "minLength": 1, "maxLength": 2000},
     "permissions": {"$ref": "index.schema.json#/$defs/Permissions"},
     "config_schema": {

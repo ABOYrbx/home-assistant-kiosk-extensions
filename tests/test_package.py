@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -40,6 +41,7 @@ class PackageTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        shutil.copytree(REPO / "schema", self.root / "schema")
         self.source = self.root / "extensions" / ID
         self.source.mkdir(parents=True)
         (self.source / "manifest.toml").write_text(MANIFEST, encoding="utf-8")
@@ -124,6 +126,26 @@ class PackageTest(unittest.TestCase):
         result = self.run_packager()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("symlink", result.stderr.lower())
+
+    def test_unknown_manifest_fields_are_rejected(self) -> None:
+        path = self.source / "manifest.toml"
+        path.write_text(path.read_text(encoding="utf-8") + "unexpected = true\n", encoding="utf-8")
+        result = self.run_packager()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unexpected", result.stderr.lower())
+
+    def test_invalid_permissions_are_rejected(self) -> None:
+        path = self.source / "manifest.toml"
+        path.write_text(path.read_text(encoding="utf-8").replace('"api.example.com"', '"*.example.com"'), encoding="utf-8")
+        result = self.run_packager()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("host", result.stderr.lower())
+
+    def test_native_files_in_the_source_tree_are_rejected(self) -> None:
+        (self.source / "plugin.so").write_bytes(b"forbidden")
+        result = self.run_packager()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("forbidden", result.stderr.lower())
 
 
 if __name__ == "__main__":

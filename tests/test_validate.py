@@ -6,6 +6,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -66,11 +67,12 @@ def manifest_toml(value: dict) -> str:
         if key in {"permissions", "config_schema"}:
             continue
         lines.append(f"{key} = {toml_value(item)}")
-    permissions = value["permissions"]
-    lines.extend(["", "[permissions]"])
-    for key, items in permissions.items():
-        rendered = "[" + ", ".join(toml_value(item) for item in items) + "]"
-        lines.append(f"{key} = {rendered}")
+    permissions = value.get("permissions")
+    if permissions is not None:
+        lines.extend(["", "[permissions]"])
+        for key, items in permissions.items():
+            rendered = "[" + ", ".join(toml_value(item) for item in items) + "]"
+            lines.append(f"{key} = {rendered}")
     for field in value["config_schema"]:
         lines.extend(["", "[[config_schema]]"])
         for key, item in field.items():
@@ -84,6 +86,7 @@ class ValidatorTest(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         (self.root / "extensions").mkdir()
+        shutil.copytree(REPO / "schema", self.root / "schema")
 
     def write_index(self, value: dict | None = None, raw: str | None = None) -> None:
         if raw is None:
@@ -94,7 +97,7 @@ class ValidatorTest(unittest.TestCase):
     def write_source(self, value: dict | None = None) -> None:
         value = copy.deepcopy(value or manifest())
         source = self.root / "extensions" / value["id"]
-        source.mkdir()
+        source.mkdir(exist_ok=True)
         (source / "manifest.toml").write_text(manifest_toml(value), encoding="utf-8")
         (source / "README.md").write_text("# Bus Departures\n", encoding="utf-8")
         (source / "LICENSE").write_text("MIT\n", encoding="utf-8")
@@ -171,7 +174,7 @@ class ValidatorTest(unittest.TestCase):
         source = manifest()
         source["config_schema"].append({"key": "token", "label": "Token", "type": "secret", "default": "unsafe"})
         self.write_source(source)
-        self.assert_invalid("secret")
+        self.assert_invalid("default")
 
     def test_wildcard_hosts_are_rejected(self) -> None:
         value = entry()
@@ -217,6 +220,92 @@ class ValidatorTest(unittest.TestCase):
                 (source / name).write_bytes(b"forbidden")
                 self.assert_invalid("forbidden")
                 (source / name).unlink()
+
+    def test_missing_entry_script_is_rejected(self) -> None:
+        value = entry()
+        self.write_index({"schema_version": 1, "generated_at": GENERATED_AT, "extensions": [value]})
+        self.write_source()
+        (self.root / "extensions" / ID / "main.rhai").unlink()
+        self.assert_invalid("entry script")
+
+    def test_omitted_permission_defaults_match_empty_index_permissions(self) -> None:
+        value = entry()
+        value["permissions"] = {}
+        self.write_index({"schema_version": 1, "generated_at": GENERATED_AT, "extensions": [value]})
+        source = manifest()
+        source.pop("permissions")
+        self.write_source(source)
+        result = self.run_validator()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_omitted_config_field_defaults_match_explicit_index_defaults(self) -> None:
+        value = entry()
+        value["config_schema"] = [{"key": "stop_id", "label": "Stop ID", "type": "string", "required": False}]
+        self.write_index({"schema_version": 1, "generated_at": GENERATED_AT, "extensions": [value]})
+        source = manifest()
+        source["config_schema"] = [{"key": "stop_id", "label": "Stop ID", "type": "string"}]
+        self.write_source(source)
+        result = self.run_validator()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_null_optional_index_fields_match_omitted_manifest_fields(self) -> None:
+        value = entry()
+        value["homepage"] = None
+        value["config_schema"] = [
+            {"key": "token", "label": "Token", "type": "secret", "default": None, "help": None, "min": None, "max": None}
+        ]
+        self.write_index({"schema_version": 1, "generated_at": GENERATED_AT, "extensions": [value]})
+        source = manifest()
+        source.pop("homepage")
+        source["config_schema"] = [{"key": "token", "label": "Token", "type": "secret"}]
+        self.write_source(source)
+        result = self.run_validator()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_dot_and_empty_path_segments_are_rejected(self) -> None:
+        for unsafe in ("./main.rhai", "nested//main.rhai", "nested/./main.rhai"):
+            with self.subTest(entry=unsafe):
+                value = entry()
+                self.write_index({"schema_version": 1, "generated_at": GENERATED_AT, "extensions": [value]})
+                source = manifest()
+                source["entry"] = unsafe
+                self.write_source(source)
+                self.assert_invalid("entry")
+
+    def test_float_default_for_integer_field_is_rejected(self) -> None:
+        value = entry()
+        value["config_schema"][1]["default"] = 6.0
+        self.write_index({"schema_version": 1, "generated_at": GENERATED_AT, "extensions": [value]})
+        source = manifest()
+        source["config_schema"][1]["default"] = 6.0
+        self.write_source(source)
+        self.assert_invalid("integer")
+
+    def test_float_api_version_is_rejected(self) -> None:
+        value = entry()
+        value["api_version"] = 1.0
+        self.write_index({"schema_version": 1, "generated_at": GENERATED_AT, "extensions": [value]})
+        self.assert_invalid("api_version")
+
+    def test_float_package_size_is_rejected(self) -> None:
+        value = entry()
+        value["size_bytes"] = 123.0
+        self.write_index({"schema_version": 1, "generated_at": GENERATED_AT, "extensions": [value]})
+        self.assert_invalid("size_bytes")
+
+    def test_float_config_bounds_are_rejected(self) -> None:
+        value = entry()
+        value["config_schema"][1]["min"] = 1.0
+        self.write_index({"schema_version": 1, "generated_at": GENERATED_AT, "extensions": [value]})
+        self.assert_invalid("min")
+
+    def test_validation_uses_schemas_from_the_catalog_root(self) -> None:
+        self.write_index()
+        schema_dir = self.root / "schema"
+        (schema_dir / "index.schema.json").write_text(
+            json.dumps({"type": "object", "required": ["catalog_marker"]}), encoding="utf-8"
+        )
+        self.assert_invalid("catalog_marker")
 
 
 if __name__ == "__main__":
