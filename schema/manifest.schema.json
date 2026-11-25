@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ABOYrbx/home-assistant-kiosk-extensions/main/schema/manifest.schema.json",
+  "title": "Home Assistant Kiosk extension manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "version",
+    "api_version",
+    "min_app_version",
+    "entry",
+    "provides",
+    "author",
+    "license",
+    "description"
+  ],
+  "properties": {
+    "id": {"$ref": "index.schema.json#/$defs/ExtensionId"},
+    "name": {"type": "string", "minLength": 1},
+    "version": {"$ref": "index.schema.json#/$defs/Semver"},
+    "api_version": {"const": 1},
+    "min_app_version": {"$ref": "index.schema.json#/$defs/Semver"},
+    "entry": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._/-]+\\.rhai$"
+    },
+    "provides": {"enum": ["departures", "list", "key_value"]},
+    "author": {"type": "string", "minLength": 1},
+    "license": {"type": "string", "minLength": 1},
+    "homepage": {"type": "string", "format": "uri", "pattern": "^https?://"},
+    "description": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "permissions": {"$ref": "index.schema.json#/$defs/Permissions"},
+    "config_schema": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {"$ref": "index.schema.json#/$defs/ConfigField"}
+    }
+  }
+}
