@@ -193,6 +193,20 @@ class ValidatorTest(unittest.TestCase):
         self.write_index({"schema_version": 1, "generated_at": "2026-11-25T01:00:00+01:00", "extensions": []})
         self.assert_invalid("utc")
 
+    def test_malformed_manifest_types_are_reported_without_traceback(self) -> None:
+        value = entry()
+        self.write_index({"schema_version": 1, "generated_at": GENERATED_AT, "extensions": [value]})
+        self.write_source()
+        path = self.root / "extensions" / ID / "manifest.toml"
+        text = path.read_text(encoding="utf-8")
+        text = text.replace("[permissions]\n", 'permissions = "not-a-table"\n\n[unused]\n')
+        text = text.replace('http_hosts = ["api.example.com"]\nha_entities = []\n', "")
+        path.write_text(text, encoding="utf-8")
+        result = self.run_validator()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("Traceback", result.stdout + result.stderr)
+        self.assertIn("permissions", result.stdout + result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

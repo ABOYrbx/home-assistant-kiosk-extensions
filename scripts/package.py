@@ -69,7 +69,17 @@ def build(root: Path, dist: Path, extension_id: str, version: str) -> dict[str, 
     for name in names:
         if not is_safe_relative_path(name):
             raise ValidationError(f"unsafe package path: {name}")
-        files[name] = regular_file(source / name, name)
+        candidate = source / name
+        current = source
+        for part in Path(name).parts[:-1]:
+            current = current / part
+            if current.is_symlink():
+                raise ValidationError(f"{name}: symlinked parent directories are not allowed")
+        try:
+            candidate.resolve().relative_to(source.resolve())
+        except ValueError as exc:
+            raise ValidationError(f"{name}: path escapes the extension source directory") from exc
+        files[name] = regular_file(candidate, name)
     if sum(len(data) for data in files.values()) > MAX_DECOMPRESSED_BYTES:
         raise ValidationError("package exceeds the 20 MiB decompressed-size limit")
 

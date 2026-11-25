@@ -270,10 +270,11 @@ def validate(root: Path) -> list[str]:
         if source_errors:
             continue
         manifest = load_toml(manifest_path)
-        errors.extend(schema_errors(manifest_validator, manifest, f"{extension_id}/manifest.toml"))
-        errors.extend(semantic_errors(manifest, f"{extension_id}/manifest.toml", manifest=True))
-        if any(error.startswith(f"{extension_id}/manifest.toml") for error in errors):
+        manifest_errors = schema_errors(manifest_validator, manifest, f"{extension_id}/manifest.toml")
+        errors.extend(manifest_errors)
+        if manifest_errors:
             continue
+        errors.extend(semantic_errors(manifest, f"{extension_id}/manifest.toml", manifest=True))
         normalized = normalized_manifest(manifest)
         normalized_entry = normalized_manifest(entry)
         for field in MATCHED_MANIFEST_FIELDS:

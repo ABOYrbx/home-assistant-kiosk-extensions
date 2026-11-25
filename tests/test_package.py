@@ -114,6 +114,17 @@ class PackageTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("entry", result.stderr.lower())
 
+    def test_symlinked_parent_directory_is_rejected(self) -> None:
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "main.rhai").write_text("outside", encoding="utf-8")
+        (self.source / "nested").symlink_to(outside, target_is_directory=True)
+        path = self.source / "manifest.toml"
+        path.write_text(path.read_text(encoding="utf-8").replace('entry = "main.rhai"', 'entry = "nested/main.rhai"'), encoding="utf-8")
+        result = self.run_packager()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("symlink", result.stderr.lower())
+
 
 if __name__ == "__main__":
     unittest.main()
